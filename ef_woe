@@ -1,0 +1,79 @@
+def woe_line(X,         # 1-d array with independent feature 
+             y,         # 1-d array with target feature
+             n_buckets,#, # number of buckets to plot
+             var_nm = None,    # optional, var_name to show above the plot
+             target_nm = None,
+             clip = None, # optional, target_name to show above the plot
+             plot_hist= None):  # optional, if True — histogram of X is displayed
+        
+        if plot_hist:
+            plt.hist(X, bins = n_buckets, color = 'skyblue')
+            plt.twinx()
+        woe_all_arr = np.log((sum(y)/len(y))/((len(y)-sum(y))/len(y)))
+        
+        x_y = [(a, b) for a, b in zip(X, y) if clip[0] <= a <=clip[1]] if clip else [(a, b) for a, b in zip(X, y)]
+        x_y.sort(key=lambda x: x[0])
+        
+        #defenition of ndex for slie array to buckets
+        ind_bucket = ceil(len(x_y)/n_buckets)
+        buckets = np.array([np.array(x_y[ind_bucket * i :ind_bucket*(i+1)]) for i in range(n_buckets)],  dtype=object)
+        
+        #let's collect woe and bad_rate per bucket
+        woe, bad_rate = [], []
+        
+        #calc woe for each buket
+        for buck in buckets:
+            ones = buck[:, 1].sum()
+            #woe for class one "o" and class zero "z"
+            o, z = ones/len(buck),  (len(buck)-ones)/len(buck)
+            #cup woe value to avoid infinity
+            if o == 0:
+                o = 0.001
+            elif o == 1:
+                o = 0.999
+            if z == 0:
+                z = 0.001
+            elif z == 1:
+                z = 0.999
+            bad_rate.append(o)
+            bucket_woe = np.log(o/z) - woe_all_arr
+            woe.append(round(bucket_woe, 3))
+
+        #graphic settings
+        plt.grid()
+        plt.xlabel("Feature value", loc = 'center')
+        plt.ylabel("Woe", loc = 'center')
+        
+        
+        # calc mean per bucket
+        buck_mean = [np.median(b[:, 0], axis = 0) for b in buckets]
+        
+        #interpolation line
+        model = LinearRegression()
+        model.fit(np.array(buck_mean).reshape((-1, 1)), woe)
+        
+        # if plot hist and add interpolation lines
+        if plot_hist:
+            interpolation_line = model.intercept_ + model.coef_*[min(X), max(X)]
+            plt.plot([min(X), max(X)], interpolation_line)
+        else: 
+            interpolation_line = model.intercept_ + model.coef_*buck_mean
+            plt.plot(buck_mean, interpolation_line)
+
+
+        #calculation of error
+        def buck_std(buck):
+            sum_ = sum([(el - y.mean())**2  for el in buck[:, 1]])
+            std = (sum_/len(buck))**0.5
+            return sum_
+        error = [1.96*buck_std(buck)/(2*len(buck)) for buck in buckets]
+        
+        #conf int for bad rate
+        conf_bad_rate = st.norm.interval(alpha= 0.95 , loc=np.mean(bad_rate), scale=st.sem(bad_rate))
+        
+ 
+        
+        plt.errorbar(buck_mean, woe, fmt = 'o', yerr = error, lw=1, capsize = 2, capthick= 2, color = 'red', linestyle = '--')
+        plt.legend(['interpolation', 'Woe'])
+        auc = roc_auc_score(y, X)
+        plt.title(f'{var_nm}|{target_nm} AUC: {auc:.2f}, conf bad rate ({conf_bad_rate[0]:.2f}, {conf_bad_rate[1]:.2f})')
